@@ -20,8 +20,20 @@ env:
   OWNER: ${{ github.repository_owner }}
 
 jobs:
+  # hashFiles() không dùng được ở `if` cấp job nên kiểm tra app đã khởi tạo qua job riêng.
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.f.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: f
+        run: |
+          if [ -f apps/api/package.json ] && [ -f apps/web/package.json ]; then echo "ready=true" >> "$GITHUB_OUTPUT"; else echo "ready=false" >> "$GITHUB_OUTPUT"; fi
+
   build-push:
-    if: ${{ hashFiles('apps/api/Dockerfile') != '' && inputs.tag == '' }}
+    needs: detect
+    if: needs.detect.outputs.ready == 'true' && inputs.tag == ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,7 +73,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy-staging:
-    needs: build-push
+    needs: [detect, build-push]
     # Chạy khi build xong (hoặc build bị bỏ qua do rollback) và đã cấu hình server staging.
     if: ${{ always() && (needs.build-push.result == 'success' || inputs.tag != '') && vars.STAGING_HOST != '' }}
     runs-on: ubuntu-latest

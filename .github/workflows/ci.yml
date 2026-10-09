@@ -14,6 +14,19 @@ permissions:
   contents: read
 
 jobs:
+  # Phát hiện app đã được khởi tạo chưa. (hashFiles() không dùng được ở `if` cấp job nên phải làm qua job riêng.)
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.f.outputs.api }}
+      web: ${{ steps.f.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: f
+        run: |
+          if [ -f apps/api/package.json ]; then echo "api=true" >> "$GITHUB_OUTPUT"; else echo "api=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -f apps/web/package.json ]; then echo "web=true" >> "$GITHUB_OUTPUT"; else echo "web=false" >> "$GITHUB_OUTPUT"; fi
+
   # Chặng 1 — chuẩn commit/PR (squash merge dùng tiêu đề PR làm commit message)
   pr-title:
     if: github.event_name == 'pull_request'
@@ -40,7 +53,8 @@ jobs:
 
   # Chặng 3 — lint + build + test + coverage cho API (chỉ chạy khi apps/api đã tồn tại)
   api:
-    if: ${{ hashFiles('apps/api/package.json') != '' }}
+    needs: detect
+    if: needs.detect.outputs.api == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -65,7 +79,8 @@ jobs:
 
   # Chặng 3 — tương tự cho Web
   web:
-    if: ${{ hashFiles('apps/web/package.json') != '' }}
+    needs: detect
+    if: needs.detect.outputs.web == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -90,7 +105,8 @@ jobs:
 
   # Chặng 4 — mã trùng lặp ≤ 3% (rubric TC2.4 Mức 5)
   duplication:
-    if: ${{ hashFiles('apps/api/package.json') != '' || hashFiles('apps/web/package.json') != '' }}
+    needs: detect
+    if: needs.detect.outputs.api == 'true' || needs.detect.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,9 +130,9 @@ jobs:
 
   # Chặng 6 — build image Docker (chưa push) để bắt lỗi Dockerfile sớm
   docker:
-    if: ${{ hashFiles('apps/api/Dockerfile') != '' }}
+    needs: [detect, api, web]
+    if: needs.detect.outputs.api == 'true' && needs.detect.outputs.web == 'true'
     runs-on: ubuntu-latest
-    needs: [api, web]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

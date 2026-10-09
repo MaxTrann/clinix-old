@@ -26,7 +26,7 @@ jobs:
     outputs:
       ready: ${{ steps.f.outputs.ready }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: f
         run: |
           if [ -f apps/api/package.json ] && [ -f apps/web/package.json ]; then echo "ready=true" >> "$GITHUB_OUTPUT"; else echo "ready=false" >> "$GITHUB_OUTPUT"; fi
@@ -41,7 +41,7 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: meta
         run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4
@@ -81,7 +81,7 @@ jobs:
     env:
       TAG: ${{ inputs.tag != '' && inputs.tag || needs.build-push.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Cấu hình SSH
         run: |
           install -m 700 -d ~/.ssh

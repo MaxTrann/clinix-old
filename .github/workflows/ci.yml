@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Chặng 1 — chuẩn commit/PR (squash merge dùng tiêu đề PR làm commit message)
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Chặng 2 — quét secret trên toàn bộ lịch sử (rubric TC2.4: 0 secret)
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          # Nếu repo thuộc một GitHub Organization, cần thêm secret GITLEAKS_LICENSE.
+
+  # Chặng 3 — lint + build + test + coverage cho API (chỉ chạy khi apps/api đã tồn tại)
+  api:
+    if: ${{ hashFiles('apps/api/package.json') != '' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test -- --coverage --ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-coverage
+          path: apps/api/coverage
+          if-no-files-found: ignore
+
+  # Chặng 3 — tương tự cho Web
+  web:
+    if: ${{ hashFiles('apps/web/package.json') != '' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test -- --coverage --run
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-coverage
+          path: apps/web/coverage
+          if-no-files-found: ignore
+
+  # Chặng 4 — mã trùng lặp ≤ 3% (rubric TC2.4 Mức 5)
+  duplication:
+    if: ${{ hashFiles('apps/api/package.json') != '' || hashFiles('apps/web/package.json') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx --yes jscpd@4 --config .jscpd.json
+
+  # Chặng 5 — quét phụ thuộc & file hệ thống (rubric TC2.6: quét bảo mật/phụ thuộc)
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  # Chặng 6 — build image Docker (chưa push) để bắt lỗi Dockerfile sớm
+  docker:
+    if: ${{ hashFiles('apps/api/Dockerfile') != '' }}
+    runs-on: ubuntu-latest
+    needs: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          target: prod
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/web
+          target: prod
+          push: false
+          build-args: VITE_API_URL=http://localhost:3000
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,21 @@
+{
+  "name": "clinix",
+  "private": true,
+  "version": "0.0.0",
+  "description": "CLINIX — Hệ thống đặt lịch khám bệnh đa nền tảng, tích hợp AI hỗ trợ",
+  "scripts": {
+    "prepare": "husky",
+    "lint": "npm run lint --prefix apps/api && npm run lint --prefix apps/web",
+    "test": "npm test --prefix apps/api && npm test --prefix apps/web",
+    "dup": "npx --yes jscpd@4",
+    "secrets": "gitleaks detect --source . --config .gitleaks.toml --verbose"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "husky": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

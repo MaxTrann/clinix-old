@@ -1,0 +1,8 @@
+{
+  "threshold": 3,
+  "reporters": ["console", "json"],
+  "output": "./reports/jscpd",
+  "path": ["apps/api/src", "apps/web/src"],
+  "ignore": ["**/node_modules/**", "**/dist/**", "**/*.spec.ts", "**/*.test.ts", "**/*.test.tsx"],
+  "gitignore": true
+}

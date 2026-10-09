@@ -1,0 +1,11 @@
+title = "CLINIX gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "File mẫu không chứa secret thật"
+paths = [
+  '''\.env\.example$''',
+  '''docs/.*\.md$''',
+]

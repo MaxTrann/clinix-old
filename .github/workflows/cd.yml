@@ -1,0 +1,104 @@
+name: CD
+
+# Tự động: mỗi lần merge vào main -> build & push image (tag = SHA) -> deploy staging -> health check.
+# Rollback: chạy workflow này thủ công (Run workflow), nhập `tag` = SHA của bản cũ muốn quay lại.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag image (SHA) cần deploy lại để rollback. Để trống = build bản mới từ main."
+        required: false
+
+concurrency:
+  group: cd-staging
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: ${{ github.repository_owner }}
+
+jobs:
+  build-push:
+    if: ${{ hashFiles('apps/api/Dockerfile') != '' && inputs.tag == '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          target: prod
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/clinix-api:${{ steps.meta.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/clinix-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/web
+          target: prod
+          push: true
+          build-args: VITE_API_URL=${{ vars.STAGING_API_URL }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/clinix-web:${{ steps.meta.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.OWNER }}/clinix-web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-staging:
+    needs: build-push
+    # Chạy khi build xong (hoặc build bị bỏ qua do rollback) và đã cấu hình server staging.
+    if: ${{ always() && (needs.build-push.result == 'success' || inputs.tag != '') && vars.STAGING_HOST != '' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      TAG: ${{ inputs.tag != '' && inputs.tag || needs.build-push.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cấu hình SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.STAGING_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ vars.STAGING_HOST }}" >> ~/.ssh/known_hosts
+      - name: Chép file compose lên server
+        run: |
+          scp -i ~/.ssh/id_deploy docker-compose.staging.yml \
+            "${{ vars.STAGING_USER }}@${{ vars.STAGING_HOST }}:${{ vars.STAGING_PATH }}/docker-compose.yml"
+      - name: Deploy
+        run: |
+          ssh -i ~/.ssh/id_deploy "${{ vars.STAGING_USER }}@${{ vars.STAGING_HOST }}" bash -s <<EOF
+            set -e
+            cd "${{ vars.STAGING_PATH }}"
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            sed -i '/^TAG=/d;/^GHCR_OWNER=/d' .env
+            echo "TAG=${TAG}" >> .env
+            echo "GHCR_OWNER=${{ github.repository_owner }}" >> .env
+            docker compose pull
+            docker compose up -d --remove-orphans
+          EOF
+      - name: Health check sau deploy
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS "${{ vars.STAGING_API_URL }}/health"; then
+              echo "Staging OK (tag ${TAG})"; exit 0
+            fi
+            echo "Chưa sẵn sàng, thử lại ($i/12)..."; sleep 10
+          done
+          echo "Health check thất bại — cân nhắc rollback bằng workflow_dispatch với tag cũ." >&2
+          exit 1

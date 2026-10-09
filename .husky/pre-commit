@@ -1,0 +1,16 @@
+# Quét secret trên phần staged. CI mới là chốt chặn cuối; hook này chỉ để phát hiện sớm.
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --config .gitleaks.toml --redact --verbose || {
+    echo "❌ gitleaks phát hiện secret trong phần staged. Gỡ ra rồi commit lại."
+    exit 1
+  }
+else
+  echo "⚠️  Chưa cài gitleaks nên bỏ qua quét secret cục bộ (CI vẫn quét). Cài: https://github.com/gitleaks/gitleaks"
+fi
+
+# Lint từng app nếu đã được khởi tạo
+for app in api web; do
+  if [ -f "apps/$app/package.json" ]; then
+    npm run lint --prefix "apps/$app" --if-present || exit 1
+  fi
+done

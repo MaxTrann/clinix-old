@@ -70,7 +70,7 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm test -- --coverage --ci
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: api-coverage
@@ -96,7 +96,7 @@ jobs:
       - run: npm run lint
       - run: npm run build
       - run: npm test -- --coverage --run
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: web-coverage
